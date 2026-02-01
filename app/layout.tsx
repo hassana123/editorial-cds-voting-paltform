@@ -40,7 +40,7 @@ export default function RootLayout({
     <html lang="en">
       <body className={`${inter.variable} font-sans antialiased`}>
         <Header />
-        <main className="">
+        <main className="min-h-screen md-px-0 px-4">
           {children}
         </main>
         <Footer />
