@@ -5,8 +5,9 @@ import { createClient } from '@/lib/supabase/server'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
-import { Vote, UserPlus, Shield, CheckCircle2, Users, ArrowRight, Sparkles } from 'lucide-react'
+import { Vote, UserPlus, Shield, CheckCircle2, Users, ArrowRight, Sparkles, TrendingUp } from 'lucide-react'
 import type { SystemSettings } from '@/lib/types'
+import { LiveVoteCounter } from '@/components/live-vote-counter'
 
 export default async function HomePage() {
   const supabase = await createClient()
@@ -17,6 +18,23 @@ export default async function HomePage() {
     .single()
   
   const systemSettings = settings as SystemSettings | null
+
+  // Get live vote stats if voting is open
+  let voteStats = []
+  let totalEligibleVoters = 0
+  
+  if (systemSettings?.voting_open) {
+    const { data: stats } = await supabase.rpc('get_live_vote_stats')
+    voteStats = stats || []
+    
+    // Get total eligible voters (CDS members who are not committee members)
+    const { count } = await supabase
+      .from('cds_members')
+      .select('*', { count: 'exact', head: true })
+      .eq('is_eligible', true)
+    
+    totalEligibleVoters = count || 0
+  }
 
   return (
     <div className="min-h-screen md:px-0 px-4">
@@ -58,11 +76,11 @@ export default async function HomePage() {
                 </div>
                 <div className={`inline-flex items-center gap-2 px-4 py-2 rounded-full text-sm font-medium ${
                   systemSettings?.voting_open 
-                    ? 'bg-primary text-primary-foreground' 
+                    ? 'bg-primary text-primary-foreground animate-pulse' 
                     : 'bg-muted text-muted-foreground'
                 }`}>
                   <Vote className="w-4 h-4" />
-                  Voting {systemSettings?.voting_open ? 'Open' : 'Closed'}
+                  Voting {systemSettings?.voting_open ? 'Live Now' : 'Closed'}
                 </div>
               </div>
               
@@ -75,7 +93,18 @@ export default async function HomePage() {
                   </Button>
                 </Link>
                 <Link href="/vote">
-                  <Button size="lg" variant="outline" disabled={!systemSettings?.voting_open} className="gap-2 bg-transparent">
+                  <Button 
+                    size="lg" 
+                    variant="outline" 
+                    disabled={!systemSettings?.voting_open} 
+                    className="gap-2 bg-transparent"
+                  >
+                    {systemSettings?.voting_open && (
+                      <span className="relative flex h-2 w-2 mr-1">
+                        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-primary opacity-75"></span>
+                        <span className="relative inline-flex rounded-full h-2 w-2 bg-primary"></span>
+                      </span>
+                    )}
                     Cast Your Vote
                     <ArrowRight className="w-4 h-4" />
                   </Button>
@@ -102,9 +131,35 @@ export default async function HomePage() {
         </div>
       </section>
 
+      {/* Live Vote Counter Section - Only show when voting is open */}
+      {systemSettings?.voting_open && voteStats.length > 0 && (
+        <section className="py-10 bg-gradient-to-b from-muted/50 to-background">
+          <div className="max-w-6xl mx-auto">
+            <div className="text-center mb-8">
+              <div className="inline-flex items-center gap-2 mb-2">
+                <TrendingUp className="w-5 h-5 text-primary" />
+                <h2 className="text-2xl md:text-3xl font-bold text-foreground">
+                  Live Election Results
+                </h2>
+              </div>
+              <p className="text-muted-foreground max-w-xl mx-auto">
+                Watch the votes come in real-time as your fellow corps members make their choices
+              </p>
+            </div>
+            
+            <div className="max-w-3xl mx-auto">
+              <LiveVoteCounter 
+                initialStats={voteStats} 
+                totalEligibleVoters={totalEligibleVoters}
+              />
+            </div>
+          </div>
+        </section>
+      )}
+
       {/* Features Section */}
       <section className="py-10 bg-muted/30">
-        <div className="max-w-6xl mx-auto ">
+        <div className="max-w-6xl mx-auto">
           <div className="text-center mb-12">
             <h2 className="text-2xl md:text-3xl font-bold text-foreground mb-3">
               Election Integrity Guaranteed
@@ -152,7 +207,7 @@ export default async function HomePage() {
       </section>
 
       {/* Actions Section */}
-      <section className="py-10 ">
+      <section className="py-10">
         <div className="max-w-6xl mx-auto">
           <div className="text-center mb-12">
             <h2 className="text-2xl md:text-3xl font-bold text-foreground mb-3">
@@ -199,8 +254,19 @@ export default async function HomePage() {
               </CardHeader>
               <CardContent>
                 <Link href="/vote">
-                  <Button className="w-full" disabled={!systemSettings?.voting_open}>
-                    {systemSettings?.voting_open ? 'Vote Now' : 'Voting Closed'}
+                  <Button 
+                    className="w-full" 
+                    disabled={!systemSettings?.voting_open}
+                  >
+                    {systemSettings?.voting_open ? (
+                      <span className="flex items-center gap-2">
+                        <span className="relative flex h-2 w-2">
+                          <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-white opacity-75"></span>
+                          <span className="relative inline-flex rounded-full h-2 w-2 bg-white"></span>
+                        </span>
+                        Vote Now
+                      </span>
+                    ) : 'Voting Closed'}
                   </Button>
                 </Link>
               </CardContent>
