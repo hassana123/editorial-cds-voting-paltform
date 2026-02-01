@@ -11,6 +11,16 @@ export interface CDSMember {
   full_name: string
   batch: string
   eligible: boolean
+  is_electoral_committee: boolean // Added to track committee status
+  ineligible_reason: string | null // Added for the voting logic
+  created_at: string
+}
+
+export interface ElectoralCommittee {
+  id: string
+  state_code: string
+  full_name: string
+  role: string
   created_at: string
 }
 

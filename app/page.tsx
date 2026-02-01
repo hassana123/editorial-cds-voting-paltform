@@ -19,7 +19,7 @@ export default async function HomePage() {
   const systemSettings = settings as SystemSettings | null
 
   return (
-    <div className="min-h-screen">
+    <div className="min-h-screen md:px-0 px-4">
       {/* Hero Section */}
       <section className="relative overflow-hidden">
         {/* Background Pattern */}

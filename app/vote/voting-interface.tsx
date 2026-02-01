@@ -6,15 +6,34 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
-import { Alert, AlertDescription } from '@/components/ui/alert'
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
-import { Loader2, CheckCircle2, XCircle, Vote, ChevronRight, Lock, User } from 'lucide-react'
+import { Progress } from '@/components/ui/progress'
+import { 
+  Loader2, CheckCircle2, XCircle, Vote, ChevronRight, Lock, User, 
+  AlertTriangle, ShieldAlert, Clock 
+} from 'lucide-react'
 import type { Position, ContestantApplication } from '@/lib/types'
 import Image from 'next/image'
+import { toast } from 'sonner'
 
 interface VotingInterfaceProps {
   positions: Position[]
   candidates: ContestantApplication[]
+}
+
+type VoteErrorCode = 
+  | 'VOTING_CLOSED' 
+  | 'NOT_REGISTERED' 
+  | 'COMMITTEE_MEMBER' 
+  | 'INELIGIBLE' 
+  | 'ALREADY_VOTED'
+  | null
+
+interface VoteError {
+  code: VoteErrorCode
+  message: string
+  description?: string
 }
 
 // Hash function for state code anonymization
@@ -26,15 +45,64 @@ async function hashStateCode(stateCode: string): Promise<string> {
   return hashArray.map(b => b.toString(16).padStart(2, '0')).join('')
 }
 
+function getErrorIcon(code: VoteErrorCode) {
+  switch (code) {
+    case 'VOTING_CLOSED':
+      return <Clock className="h-5 w-5" />
+    case 'NOT_REGISTERED':
+      return <User className="h-5 w-5" />
+    case 'COMMITTEE_MEMBER':
+      return <ShieldAlert className="h-5 w-5" />
+    case 'INELIGIBLE':
+    case 'ALREADY_VOTED':
+      return <AlertTriangle className="h-5 w-5" />
+    default:
+      return <XCircle className="h-5 w-5" />
+  }
+}
+
+function getErrorDetails(code: VoteErrorCode): { title: string; description: string } {
+  switch (code) {
+    case 'VOTING_CLOSED':
+      return {
+        title: 'Voting is Closed',
+        description: 'The voting period has ended or has not started yet. Please check with the electoral committee for voting schedules.',
+      }
+    case 'NOT_REGISTERED':
+      return {
+        title: 'Not Registered',
+        description: 'Your state code is not found in the CDS members registry. Only registered members can vote. Please contact the electoral committee if you believe this is an error.',
+      }
+    case 'COMMITTEE_MEMBER':
+      return {
+        title: 'Committee Members Cannot Vote',
+        description: 'As a member of the electoral committee, you are not eligible to vote. This ensures fair and unbiased election proceedings.',
+      }
+    case 'INELIGIBLE':
+      return {
+        title: 'Account Ineligible',
+        description: 'Your account has been marked as ineligible to vote. This may be due to policy violations or administrative actions. Contact the electoral committee for details.',
+      }
+    case 'ALREADY_VOTED':
+      return {
+        title: 'Already Voted',
+        description: 'You have already cast your vote for this position. Each member can only vote once per position to ensure fair election results.',
+      }
+    default:
+      return {
+        title: 'Cannot Vote',
+        description: 'An error occurred while processing your vote. Please try again or contact support.',
+      }
+  }
+}
+
 export function VotingInterface({ positions, candidates }: VotingInterfaceProps) {
   const [step, setStep] = useState<'verify' | 'vote' | 'complete'>('verify')
   const [stateCode, setStateCode] = useState('')
   const [voterHash, setVoterHash] = useState('')
-  const [loading, setLoading] = useState(false)
-  const [error, setError] = useState<string | null>(null)
   const [verifying, setVerifying] = useState(false)
-  const [verified, setVerified] = useState(false)
-  
+  const [voteError, setVoteError] = useState<VoteError | null>(null)
+
   const [currentPositionIndex, setCurrentPositionIndex] = useState(0)
   const [selectedCandidate, setSelectedCandidate] = useState<string | null>(null)
   const [votedPositions, setVotedPositions] = useState<Set<string>>(new Set())
@@ -42,15 +110,19 @@ export function VotingInterface({ positions, candidates }: VotingInterfaceProps)
 
   const currentPosition = positions[currentPositionIndex]
   const positionCandidates = candidates.filter(c => c.position_id === currentPosition?.id)
+  const progress = (votedPositions.size / positions.length) * 100
 
   const verifyVoter = async () => {
     if (!stateCode || stateCode.length < 5) {
-      setError('Please enter a valid state code')
+      setVoteError({
+        code: null,
+        message: 'Please enter a valid state code',
+      })
       return
     }
 
     setVerifying(true)
-    setError(null)
+    setVoteError(null)
 
     const supabase = createClient()
 
@@ -62,13 +134,31 @@ export function VotingInterface({ positions, candidates }: VotingInterfaceProps)
       .single()
 
     if (memberError || !member) {
-      setError('Your state code is not found in the CDS members list. Only registered members can vote.')
+      setVoteError({
+        code: 'NOT_REGISTERED',
+        message: 'State code not found',
+        description: 'Your state code is not registered in the CDS members list.',
+      })
+      setVerifying(false)
+      return
+    }
+
+    if (member.is_electoral_committee) {
+      setVoteError({
+        code: 'COMMITTEE_MEMBER',
+        message: 'Committee members cannot vote',
+        description: 'Electoral committee members are not allowed to vote.',
+      })
       setVerifying(false)
       return
     }
 
     if (!member.eligible) {
-      setError('Your account is not eligible to vote. Please contact the electoral committee.')
+      setVoteError({
+        code: 'INELIGIBLE',
+        message: member.ineligible_reason || 'Your account is not eligible to vote',
+        description: 'Please contact the electoral committee for more information.',
+      })
       setVerifying(false)
       return
     }
@@ -86,10 +176,11 @@ export function VotingInterface({ positions, candidates }: VotingInterfaceProps)
     if (existingVotes && existingVotes.length > 0) {
       const votedPosIds = new Set(existingVotes.map(v => v.position_id))
       setVotedPositions(votedPosIds)
-      
+
       // Find first position not yet voted for
       const firstUnvotedIndex = positions.findIndex(p => !votedPosIds.has(p.id))
       if (firstUnvotedIndex === -1) {
+        // All positions voted - go to complete
         setStep('complete')
         setVerifying(false)
         return
@@ -97,7 +188,7 @@ export function VotingInterface({ positions, candidates }: VotingInterfaceProps)
       setCurrentPositionIndex(firstUnvotedIndex)
     }
 
-    setVerified(true)
+    toast.success('✓ Verified successfully')
     setStep('vote')
     setVerifying(false)
   }
@@ -106,59 +197,48 @@ export function VotingInterface({ positions, candidates }: VotingInterfaceProps)
     if (!selectedCandidate || !currentPosition) return
 
     setVoting(true)
-    setError(null)
+    setVoteError(null)
 
     const supabase = createClient()
 
-    // Double-check hasn't already voted for this position
-    const { data: existingVote } = await supabase
-      .from('votes')
-      .select('id')
-      .eq('voter_state_code_hash', voterHash)
-      .eq('position_id', currentPosition.id)
-      .single()
+    // Call the secure RPC function
+    const { data: result, error: rpcError } = await supabase.rpc('cast_vote', {
+      voter_code: stateCode.toUpperCase(),
+      pos_id: currentPosition.id,
+      cand_id: selectedCandidate,
+    })
 
-    if (existingVote) {
-      setError('You have already voted for this position')
-      setVoting(false)
-      return
-    }
-
-    // Cast the vote
-    const { error: voteError } = await supabase
-      .from('votes')
-      .insert({
-        voter_state_code_hash: voterHash,
-        position_id: currentPosition.id,
-        candidate_id: selectedCandidate
+    if (rpcError || !result?.success) {
+      const errorCode = result?.reason_code as VoteErrorCode
+      setVoteError({
+        code: errorCode,
+        message: result?.error || 'Unable to cast vote',
       })
-
-    if (voteError) {
-      setError('Failed to cast vote. Please try again.')
       setVoting(false)
       return
     }
 
-    // Update voted positions
+    // Success!
+    toast.success('✓ Vote cast successfully')
     setVotedPositions(prev => new Set([...prev, currentPosition.id]))
     setSelectedCandidate(null)
 
     // Move to next position or complete
-    const nextUnvotedIndex = positions.findIndex((p, i) => 
-      i > currentPositionIndex && !votedPositions.has(p.id)
+    const nextUnvotedIndex = positions.findIndex(
+      (p, i) => i > currentPositionIndex && !votedPositions.has(p.id)
     )
 
     if (nextUnvotedIndex === -1) {
       // Check if all positions voted
-      const allVoted = positions.every(p => 
-        votedPositions.has(p.id) || p.id === currentPosition.id
+      const allVoted = positions.every(
+        p => votedPositions.has(p.id) || p.id === currentPosition.id
       )
       if (allVoted) {
         setStep('complete')
       } else {
         // Find any unvoted position
-        const anyUnvoted = positions.findIndex(p => 
-          !votedPositions.has(p.id) && p.id !== currentPosition.id
+        const anyUnvoted = positions.findIndex(
+          p => !votedPositions.has(p.id) && p.id !== currentPosition.id
         )
         if (anyUnvoted !== -1) {
           setCurrentPositionIndex(anyUnvoted)
@@ -174,8 +254,8 @@ export function VotingInterface({ positions, candidates }: VotingInterfaceProps)
   }
 
   const skipPosition = () => {
-    const nextIndex = positions.findIndex((p, i) => 
-      i > currentPositionIndex && !votedPositions.has(p.id)
+    const nextIndex = positions.findIndex(
+      (p, i) => i > currentPositionIndex && !votedPositions.has(p.id)
     )
 
     if (nextIndex === -1) {
@@ -200,10 +280,13 @@ export function VotingInterface({ positions, candidates }: VotingInterfaceProps)
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
-          {error && (
+          {voteError && (
             <Alert variant="destructive">
-              <XCircle className="h-4 w-4" />
-              <AlertDescription>{error}</AlertDescription>
+              {getErrorIcon(voteError.code)}
+              <AlertTitle>{getErrorDetails(voteError.code).title}</AlertTitle>
+              <AlertDescription className="mt-2">
+                {getErrorDetails(voteError.code).description}
+              </AlertDescription>
             </Alert>
           )}
 
@@ -214,15 +297,12 @@ export function VotingInterface({ positions, candidates }: VotingInterfaceProps)
               placeholder="e.g., KN/24A/1234"
               value={stateCode}
               onChange={(e) => setStateCode(e.target.value)}
+              onKeyDown={(e) => e.key === 'Enter' && verifyVoter()}
               className="uppercase text-center text-lg"
             />
           </div>
 
-          <Button 
-            onClick={verifyVoter} 
-            className="w-full"
-            disabled={verifying || !stateCode}
-          >
+          <Button onClick={verifyVoter} className="w-full" disabled={verifying || !stateCode}>
             {verifying ? (
               <>
                 <Loader2 className="w-4 h-4 mr-2 animate-spin" />
@@ -236,9 +316,12 @@ export function VotingInterface({ positions, candidates }: VotingInterfaceProps)
             )}
           </Button>
 
-          <p className="text-xs text-center text-muted-foreground">
-            Your identity will be anonymized. Only your hashed state code is stored with your vote.
-          </p>
+          <div className="pt-4 border-t">
+            <p className="text-xs text-center text-muted-foreground">
+              🔒 Your identity is protected through anonymization. Only your hashed state code
+              is stored with your vote.
+            </p>
+          </div>
         </CardContent>
       </Card>
     )
@@ -253,12 +336,14 @@ export function VotingInterface({ positions, candidates }: VotingInterfaceProps)
             <CheckCircle2 className="w-10 h-10 text-primary" />
           </div>
           <h2 className="text-2xl font-bold text-foreground mb-2">Thank You!</h2>
-          <p className="text-muted-foreground mb-6">
-            You have completed voting for all available positions. Your votes have been recorded securely and anonymously.
+          <p className="text-muted-foreground mb-2">
+            You have completed voting for all available positions.
           </p>
-          <Button onClick={() => window.location.href = '/'}>
-            Return to Home
-          </Button>
+          <p className="text-sm text-muted-foreground mb-6">
+            Your votes have been recorded securely and anonymously. Results will be announced
+            by the electoral committee.
+          </p>
+          <Button onClick={() => (window.location.href = '/')}>Return to Home</Button>
         </CardContent>
       </Card>
     )
@@ -267,15 +352,31 @@ export function VotingInterface({ positions, candidates }: VotingInterfaceProps)
   // Voting Step
   return (
     <div className="space-y-6">
-      {/* Progress */}
-      <div className="flex items-center justify-between text-sm">
-        <span className="text-muted-foreground">
-          Position {currentPositionIndex + 1} of {positions.length}
-        </span>
-        <Badge variant="outline" className="bg-transparent">
-          {votedPositions.size} votes cast
-        </Badge>
-      </div>
+      {/* Progress Bar */}
+      <Card>
+        <CardContent className="pt-6">
+          <div className="space-y-3">
+            <div className="flex items-center justify-between text-sm">
+              <span className="text-muted-foreground">Voting Progress</span>
+              <Badge variant="outline" className="bg-transparent">
+                {votedPositions.size}/{positions.length} positions
+              </Badge>
+            </div>
+            <Progress value={progress} className="h-2" />
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Error Display */}
+      {voteError && (
+        <Alert variant="destructive">
+          {getErrorIcon(voteError.code)}
+          <AlertTitle>{getErrorDetails(voteError.code).title}</AlertTitle>
+          <AlertDescription className="mt-2">
+            {getErrorDetails(voteError.code).description}
+          </AlertDescription>
+        </Alert>
+      )}
 
       {/* Current Position */}
       <Card>
@@ -289,33 +390,29 @@ export function VotingInterface({ positions, candidates }: VotingInterfaceProps)
           </div>
         </CardHeader>
         <CardContent className="space-y-4">
-          {error && (
-            <Alert variant="destructive" className="mb-4">
-              <XCircle className="h-4 w-4" />
-              <AlertDescription>{error}</AlertDescription>
-            </Alert>
-          )}
-
           {positionCandidates.length === 0 ? (
             <div className="text-center py-8">
               <User className="w-12 h-12 text-muted-foreground/50 mx-auto mb-3" />
-              <p className="text-muted-foreground">No approved candidates for this position</p>
-              <Button variant="outline" onClick={skipPosition} className="mt-4 bg-transparent">
+              <p className="text-muted-foreground mb-4">
+                No approved candidates for this position
+              </p>
+              <Button variant="outline" onClick={skipPosition} className="bg-transparent">
                 Skip to Next Position
               </Button>
             </div>
           ) : (
             <>
               <div className="grid gap-4">
-                {positionCandidates.map((candidate) => (
+                {positionCandidates.map(candidate => (
                   <div
                     key={candidate.id}
                     onClick={() => setSelectedCandidate(candidate.id)}
                     className={`
                       relative p-4 rounded-lg border-2 cursor-pointer transition-all
-                      ${selectedCandidate === candidate.id 
-                        ? 'border-primary bg-primary/5' 
-                        : 'border-border hover:border-primary/50'
+                      ${
+                        selectedCandidate === candidate.id
+                          ? 'border-primary bg-primary/5 shadow-md'
+                          : 'border-border hover:border-primary/50 hover:shadow-sm'
                       }
                     `}
                   >
@@ -331,15 +428,20 @@ export function VotingInterface({ positions, candidates }: VotingInterfaceProps)
                       <div className="flex-1 min-w-0">
                         <h3 className="font-semibold text-foreground">{candidate.full_name}</h3>
                         <p className="text-sm text-muted-foreground">{candidate.state_code}</p>
-                        <p className="text-sm text-primary mt-1 italic">"{candidate.mantra}"</p>
+                        <p className="text-sm text-primary mt-1 italic">
+                          "{candidate.mantra}"
+                        </p>
                       </div>
-                      <div className={`
+                      <div
+                        className={`
                         w-6 h-6 rounded-full border-2 flex items-center justify-center shrink-0
-                        ${selectedCandidate === candidate.id 
-                          ? 'border-primary bg-primary' 
-                          : 'border-muted-foreground/30'
+                        ${
+                          selectedCandidate === candidate.id
+                            ? 'border-primary bg-primary'
+                            : 'border-muted-foreground/30'
                         }
-                      `}>
+                      `}
+                      >
                         {selectedCandidate === candidate.id && (
                           <CheckCircle2 className="w-4 h-4 text-primary-foreground" />
                         )}
@@ -350,14 +452,10 @@ export function VotingInterface({ positions, candidates }: VotingInterfaceProps)
               </div>
 
               <div className="flex gap-3 pt-4">
-                <Button 
-                  variant="outline" 
-                  onClick={skipPosition}
-                  className="flex-1 bg-transparent"
-                >
+                <Button variant="outline" onClick={skipPosition} className="flex-1 bg-transparent">
                   Skip Position
                 </Button>
-                <Button 
+                <Button
                   onClick={castVote}
                   disabled={!selectedCandidate || voting}
                   className="flex-1"
@@ -391,13 +489,15 @@ export function VotingInterface({ positions, candidates }: VotingInterfaceProps)
               <Badge
                 key={position.id}
                 variant={
-                  votedPositions.has(position.id) 
-                    ? 'default' 
-                    : index === currentPositionIndex 
-                      ? 'secondary' 
+                  votedPositions.has(position.id)
+                    ? 'default'
+                    : index === currentPositionIndex
+                      ? 'secondary'
                       : 'outline'
                 }
-                className={`text-xs ${votedPositions.has(position.id) ? '' : 'bg-transparent'}`}
+                className={`text-xs ${
+                  votedPositions.has(position.id) ? '' : 'bg-transparent'
+                }`}
               >
                 {votedPositions.has(position.id) && (
                   <CheckCircle2 className="w-3 h-3 mr-1" />

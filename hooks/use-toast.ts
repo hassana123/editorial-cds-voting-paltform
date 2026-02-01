@@ -167,6 +167,21 @@ function toast({ ...props }: Toast) {
     update,
   }
 }
+function showSuccess(message: string, description?: string) {
+  toast({
+    title: "Success ✅",
+    description: description || message,
+  });
+}
+
+function showError(message: string, description?: string) {
+  toast({
+    title: "Error ❌",
+    description: description || message,
+    variant: "destructive",
+  });
+}
+
 
 function useToast() {
   const [state, setState] = React.useState<State>(memoryState)
@@ -184,6 +199,8 @@ function useToast() {
   return {
     ...state,
     toast,
+    showSuccess,
+    showError,
     dismiss: (toastId?: string) => dispatch({ type: 'DISMISS_TOAST', toastId }),
   }
 }
