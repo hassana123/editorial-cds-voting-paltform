@@ -52,6 +52,21 @@ export function AddCommitteeForm({ onSuccess, onError }: AddCommitteeFormProps) 
           onError(error.message || 'Failed to add committee member')
         }
       } else {
+        const normalizedStateCode = formData.state_code.toUpperCase()
+        const { error: memberUpdateError } = await supabase
+          .from('cds_members')
+          .update({
+            eligible: false,
+            is_electoral_committee: true,
+            ineligible_reason: 'Electoral committee member'
+          })
+          .eq('state_code', normalizedStateCode)
+
+        if (memberUpdateError) {
+          onError(memberUpdateError.message || 'Failed to update member eligibility')
+          return
+        }
+
         onSuccess(`${formData.full_name} added to electoral committee successfully!`)
         setFormData({ state_code: '', full_name: '', role: 'member', batch: '' })
         router.refresh()

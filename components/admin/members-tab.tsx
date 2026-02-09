@@ -25,7 +25,7 @@ export function MembersTab({ initialMembers }: MembersTabProps) {
   const [members, setMembers] = useState(initialMembers)
   const [searchTerm, setSearchTerm] = useState('')
   const [currentPage, setCurrentPage] = useState(1)
-  const [itemsPerPage, setItemsPerPage] = useState(25)
+  const [itemsPerPage, setItemsPerPage] = useState(5)
   const [newMember, setNewMember] = useState({ state_code: '', full_name: '', batch: '' })
   const [bulkUpload, setBulkUpload] = useState('')
   const [csvFile, setCsvFile] = useState<File | null>(null)

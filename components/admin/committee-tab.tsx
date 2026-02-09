@@ -27,7 +27,7 @@ export function CommitteeTab({ initialCommittee, positions }: CommitteeTabProps)
   const [committee, setCommittee] = useState(initialCommittee)
   const [searchTerm, setSearchTerm] = useState('')
   const [currentPage, setCurrentPage] = useState(1)
-  const [itemsPerPage, setItemsPerPage] = useState(10)
+  const [itemsPerPage, setItemsPerPage] = useState(5)
   const [newCommittee, setNewCommittee] = useState({ 
     state_code: '', 
     full_name: '', 

@@ -1,5 +1,4 @@
 //'use cache'
-
 import { createClient } from '@/lib/supabase/server'
 import { redirect } from 'next/navigation'
 import { VotingInterface } from './voting-interface'

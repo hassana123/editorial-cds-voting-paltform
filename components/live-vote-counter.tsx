@@ -80,7 +80,7 @@ export function LiveVoteCounter({ initialStats, totalEligibleVoters }: LiveVoteC
   const turnoutPercentage = totalEligibleVoters > 0 
     ? (totalVotes / totalEligibleVoters) * 100 
     : 0
-
+console.log('Rendering LiveVoteCounter with stats:', stats, 'and totalVotes:', totalVotes);
   return (
     <div className="space-y-6">
       {/* Live Indicator */}

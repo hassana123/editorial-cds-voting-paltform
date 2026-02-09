@@ -8,6 +8,7 @@ import { Badge } from '@/components/ui/badge'
 import { Vote, UserPlus, Shield, CheckCircle2, Users, ArrowRight, Sparkles, TrendingUp } from 'lucide-react'
 import type { SystemSettings } from '@/lib/types'
 import { LiveVoteCounter } from '@/components/live-vote-counter'
+//import { log } from 'console'
 
 export default async function HomePage() {
   const supabase = await createClient()
@@ -22,18 +23,47 @@ export default async function HomePage() {
   // Get live vote stats if voting is open
   let voteStats = []
   let totalEligibleVoters = 0
+  let totalVotes = 0
+  let turnoutPercentage = 0
+  let leadingSummary: { position_name: string; leading_candidate: string; leading_votes: number }[] = []
   
   if (systemSettings?.voting_open) {
     const { data: stats } = await supabase.rpc('get_live_vote_stats')
     voteStats = stats || []
+    console.log(stats);
+    
     
     // Get total eligible voters (CDS members who are not committee members)
     const { count } = await supabase
       .from('cds_members')
       .select('*', { count: 'exact', head: true })
-      .eq('is_eligible', true)
+      .eq('eligible', true)
+      .eq('is_electoral_committee', false)
     
     totalEligibleVoters = count || 0
+
+    totalVotes = voteStats.reduce(
+      (sum: number, stat: { total_votes?: number }) => sum + (stat?.total_votes || 0),
+      0
+    )
+    turnoutPercentage =
+      totalEligibleVoters > 0 ? (totalVotes / totalEligibleVoters) * 100 : 0
+    leadingSummary = voteStats
+      .filter(
+        (stat: { leading_candidate?: string | null }) => !!stat.leading_candidate
+      )
+      .slice(0, 3)
+      .map(
+        (stat: {
+          position_name: string
+          leading_candidate: string
+          leading_votes: number
+        }) => ({
+          position_name: stat.position_name,
+          leading_candidate: stat.leading_candidate,
+          leading_votes: stat.leading_votes || 0
+        })
+      )
   }
 
   return (
@@ -112,27 +142,80 @@ export default async function HomePage() {
               </div>
             </div>
             
-            {/* Right Content - Logo/Image */}
+            {/* Right Content - Logo/Image or Live Summary */}
             <div className="order-1 md:order-2 flex justify-center">
-              <div className="relative">
-                <div className="absolute inset-0 bg-primary/20 rounded-full blur-2xl scale-110" />
-                <div className="relative w-48 h-48 md:w-64 md:h-64 rounded-full overflow-hidden ring-4 ring-background shadow-2xl">
-                  <Image
-                    src="/images/logo.jpeg"
-                    alt="NYSC Editorial CDS Logo"
-                    fill
-                    className="object-cover"
-                    priority
-                  />
+              {systemSettings?.voting_open ? (
+                <Card className="w-full max-w-sm border-border/50 shadow-lg">
+                  <CardHeader>
+                    <CardTitle className="flex items-center gap-2">
+                      <TrendingUp className="w-5 h-5 text-primary" />
+                      Live Vote Summary
+                    </CardTitle>
+                    <CardDescription>
+                      Real-time progress while voting is live
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent className="space-y-4">
+                    <div className="flex items-center justify-between text-sm">
+                      <span className="text-muted-foreground">Total Votes</span>
+                      <span className="font-semibold text-foreground">
+                        {totalVotes.toLocaleString()}
+                      </span>
+                    </div>
+                    <div className="flex items-center justify-between text-sm">
+                      <span className="text-muted-foreground">Turnout</span>
+                      <span className="font-semibold text-foreground">
+                        {turnoutPercentage.toFixed(1)}%
+                      </span>
+                    </div>
+                    <div className="space-y-2">
+                      <p className="text-sm font-medium text-foreground">
+                        Leading Candidates
+                      </p>
+                      <div className="flex flex-wrap gap-2">
+                        {leadingSummary.length > 0 ? (
+                          leadingSummary.map((leader) => (
+                            <Badge key={leader.position_name} variant="secondary">
+                              {leader.position_name}: {leader.leading_candidate} (
+                              {leader.leading_votes})
+                            </Badge>
+                          ))
+                        ) : (
+                          <span className="text-sm text-muted-foreground">
+                            No leading candidate yet.
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                    <Link href="#live-results">
+                      <Button className="w-full gap-2">
+                        View Full Live Results
+                        <ArrowRight className="w-4 h-4" />
+                      </Button>
+                    </Link>
+                  </CardContent>
+                </Card>
+              ) : (
+                <div className="relative">
+                  <div className="absolute inset-0 bg-primary/20 rounded-full blur-2xl scale-110" />
+                  <div className="relative w-48 h-48 md:w-64 md:h-64 rounded-full overflow-hidden ring-4 ring-background shadow-2xl">
+                    <Image
+                      src="/images/logo.jpeg"
+                      alt="NYSC Editorial CDS Logo"
+                      fill
+                      className="object-cover"
+                      priority
+                    />
+                  </div>
                 </div>
-              </div>
+              )}
             </div>
           </div>
         </div>
       </section>
 
       {/* Live Vote Counter Section - Only show when voting is open */}
-      {systemSettings?.voting_open && voteStats.length > 0 && (
+      {systemSettings?.voting_open && (
         <section className="py-10 bg-gradient-to-b from-muted/50 to-background">
           <div className="max-w-6xl mx-auto">
             <div className="text-center mb-8">
