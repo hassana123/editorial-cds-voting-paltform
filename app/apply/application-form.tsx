@@ -21,6 +21,8 @@ interface ApplicationFormProps {
   positions: Position[]
 }
 
+const normalizeStateCode = (value: string) => value.trim().toUpperCase()
+
 const CLOUDINARY_CLOUD_NAME = process.env.NEXT_PUBLIC_CLOUDINARY_CLOUD_NAME || 'demo'
 const CLOUDINARY_UPLOAD_PRESET = process.env.NEXT_PUBLIC_CLOUDINARY_UPLOAD_PRESET || 'ml_default'
 
@@ -51,6 +53,9 @@ export function ApplicationForm({ positions }: ApplicationFormProps) {
     image_url: ''
   })
 
+  const [hasDuplicateApplication, setHasDuplicateApplication] = useState(false)
+  const [checkingDuplicateApplication, setCheckingDuplicateApplication] = useState(false)
+
   // Calculate form completion percentage
   const formCompletion = useMemo(() => {
     const fields = [
@@ -70,12 +75,15 @@ export function ApplicationForm({ positions }: ApplicationFormProps) {
   }, [formData])
 
   const verifyStateCode = async (stateCode: string) => {
-    if (!stateCode || stateCode.length < 5) {
+    const normalizedStateCode = normalizeStateCode(stateCode)
+
+    if (!normalizedStateCode || normalizedStateCode.length < 5) {
       setStateCodeVerified(null)
       setIsCommitteeMember(false)
       return
     }
     
+    setFormData(prev => ({ ...prev, state_code: normalizedStateCode }))
     setVerifying(true)
     setError(null)
     const supabase = createClient()
@@ -84,7 +92,7 @@ export function ApplicationForm({ positions }: ApplicationFormProps) {
     const { data: member, error: memberError } = await supabase
       .from('cds_members')
       .select('*')
-      .eq('state_code', stateCode.toUpperCase())
+      .eq('state_code', normalizedStateCode)
       .single()
     
     if (memberError || !member) {
@@ -98,7 +106,7 @@ export function ApplicationForm({ positions }: ApplicationFormProps) {
       const { data: committee } = await supabase
         .from('electoral_committee')
         .select('*')
-        .eq('state_code', stateCode.toUpperCase())
+        .eq('state_code', normalizedStateCode)
         .single()
       
       if (committee) {
@@ -118,6 +126,49 @@ export function ApplicationForm({ positions }: ApplicationFormProps) {
     }
     setVerifying(false)
   }
+
+  useEffect(() => {
+    let isMounted = true
+    const sanitizedStateCode = normalizeStateCode(formData.state_code)
+
+    if (!stateCodeVerified || !formData.position_id || !sanitizedStateCode) {
+      setHasDuplicateApplication(false)
+      setCheckingDuplicateApplication(false)
+      return
+    }
+
+    const checkDuplicate = async () => {
+      setHasDuplicateApplication(false)
+      setCheckingDuplicateApplication(true)
+
+      try {
+        const supabase = createClient()
+        const { data: existing } = await supabase
+          .from('contestant_applications')
+          .select('id')
+          .eq('state_code', sanitizedStateCode)
+          .eq('position_id', formData.position_id)
+          .single()
+
+        if (!isMounted) return
+        setHasDuplicateApplication(Boolean(existing))
+      } catch (duplicateCheckError) {
+        if (!isMounted) return
+        console.error('Failed to check existing application', duplicateCheckError)
+        setHasDuplicateApplication(false)
+      } finally {
+        if (isMounted) {
+          setCheckingDuplicateApplication(false)
+        }
+      }
+    }
+
+    checkDuplicate()
+
+    return () => {
+      isMounted = false
+    }
+  }, [stateCodeVerified, formData.position_id, formData.state_code])
 
   const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
@@ -180,6 +231,7 @@ export function ApplicationForm({ positions }: ApplicationFormProps) {
     e.preventDefault()
     setLoading(true)
     setError(null)
+    const normalizedStateCode = normalizeStateCode(formData.state_code)
 
     // Validation
     if (!stateCodeVerified) {
@@ -217,7 +269,7 @@ export function ApplicationForm({ positions }: ApplicationFormProps) {
     const { data: existingApp } = await supabase
       .from('contestant_applications')
       .select('id')
-      .eq('state_code', formData.state_code.toUpperCase())
+      .eq('state_code', normalizedStateCode)
       .eq('position_id', formData.position_id)
       .single()
 
@@ -233,7 +285,7 @@ export function ApplicationForm({ positions }: ApplicationFormProps) {
       .from('contestant_applications')
       .insert({
         full_name: formData.full_name,
-        state_code: formData.state_code.toUpperCase(),
+        state_code: normalizedStateCode,
         email: formData.email,
         phone: formData.phone,
         batch: formData.batch,
@@ -317,12 +369,13 @@ export function ApplicationForm({ positions }: ApplicationFormProps) {
         <div className="space-y-2 pl-10">
           <Label htmlFor="state_code">State Code *</Label>
           <div className="relative">
-            <Input
-              id="state_code"
-              placeholder="e.g., KN/24A/1234"
-              value={formData.state_code}
-              onChange={(e) => {
-                setFormData(prev => ({ ...prev, state_code: e.target.value }))
+          <Input
+            id="state_code"
+            placeholder="e.g., KN/24A/1234"
+            value={formData.state_code}
+            onChange={(e) => {
+                const inputValue = e.target.value.toUpperCase()
+                setFormData(prev => ({ ...prev, state_code: inputValue }))
                 setStateCodeVerified(null)
                 setIsCommitteeMember(false)
               }}
@@ -461,6 +514,23 @@ export function ApplicationForm({ positions }: ApplicationFormProps) {
               </SelectContent>
             </Select>
           </div>
+
+          {checkingDuplicateApplication && (
+            <p className="text-xs text-muted-foreground mt-2 flex items-center gap-1">
+              <Loader2 className="h-3 w-3 animate-spin text-muted-foreground" />
+              Checking if you've already applied for this position...
+            </p>
+          )}
+
+          {hasDuplicateApplication && (
+            <Alert variant="destructive" className="mt-2">
+              <XCircle className="h-4 w-4" />
+              <AlertTitle className="text-sm font-semibold">Duplicate application</AlertTitle>
+              <AlertDescription className="text-sm text-foreground">
+                A submission with this state code already exists for the selected position. Duplicate entries are not allowed.
+              </AlertDescription>
+            </Alert>
+          )}
 
           <div className="space-y-2">
             <Label htmlFor="attendance_rating">Attendance Rating (1-10) *</Label>
@@ -606,7 +676,14 @@ export function ApplicationForm({ positions }: ApplicationFormProps) {
         <Button 
           type="submit" 
           className="w-full h-12 text-base" 
-          disabled={loading || !stateCodeVerified || isCommitteeMember || formCompletion < 100}
+          disabled={
+            loading ||
+            !stateCodeVerified ||
+            isCommitteeMember ||
+            formCompletion < 100 ||
+            hasDuplicateApplication ||
+            checkingDuplicateApplication
+          }
         >
           {loading ? (
             <>
